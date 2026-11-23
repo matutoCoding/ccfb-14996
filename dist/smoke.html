@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>WebGL 冒烟测试</title>
+    <style>
+      body { font-family: monospace; background: #0f141c; color: #e6ebf2; padding: 16px }
+      .pass { color: #46b07a }
+      .fail { color: #e05563 }
+      canvas { width: 320px; height: 240px; border: 1px solid #2a3648 }
+    </style>
+  </head>
+  <body>
+    <h2>WebGL2 冒烟测试</h2>
+    <canvas id="c" width="640" height="480"></canvas>
+    <pre id="out"></pre>
+    <script type="module">
+      import { MosaicRenderer } from '/src/core/renderer.ts'
+      import { generateLayout, DEFAULT_PARAMS } from '/src/core/layout.ts'
+      const out = document.getElementById('out')
+      const lines = []
+      const log = (ok, msg) => {
+        lines.push(`${ok ? 'PASS' : 'FAIL'}  ${msg}`)
+        out.innerHTML = lines.map((l) => `<span class="${l.startsWith('PASS') ? 'pass' : 'fail'}">${l}</span>`).join('\n')
+      }
+      try {
+        const wall = { kind: 'flat', width: 4, height: 3, radius: 0, arcAngle: 0, azimuth: 0 }
+        const materials = [
+          { id: 'mat-01', name: '蓝', category: 'glass', color: [38, 78, 142], opacity: 0.9, roughness: 0.2, reflectivity: 0.8, stock: 999999 },
+          { id: 'mat-02', name: '金', category: 'gold', color: [212, 170, 72], opacity: 1, roughness: 0.08, reflectivity: 1, stock: 999999 },
+          { id: 'mat-03', name: '石', category: 'stone', color: [88, 92, 98], opacity: 1, roughness: 0.58, reflectivity: 0.22, stock: 999999 },
+        ]
+        const { tiles } = generateLayout(wall, { ...DEFAULT_PARAMS, baseSize: 0.012 }, null, null, materials)
+        log(tiles.count > 10000, `排块生成 ${tiles.count} 块`)
+
+        const canvas = document.getElementById('c')
+        const renderer = new MosaicRenderer(canvas, wall)
+        log(true, 'WebGL2 上下文 + shader 编译/链接成功（含片元 uHeight）')
+        renderer.uploadTiles(tiles)
+        renderer.uploadMaterials(tiles, materials)
+        log(true, '实例缓冲与调色板纹理上传成功')
+        renderer.render()
+        const gl = canvas.getContext('webgl2')
+        const err = gl.getError()
+        log(err === 0, `首次实例化 draw call 无 GL 错误（getError=${err}）`)
+
+        // 三种光源各渲一帧 + 死白开关
+        for (const mode of ['daylight', 'spot', 'candle']) {
+          renderer.lightMode = mode
+          renderer.render()
+        }
+        renderer.showBurn = true
+        renderer.render()
+        log(gl.getError() === 0, '三种光源与死白报警渲染无 GL 错误')
+
+        // 拾取路径（FBO 编码实例 ID）
+        const id = renderer.pick(0.5, 0.5)
+        log(id >= 0 && id < tiles.count, `FBO 拾取返回合法实例 id=${id}`)
+
+        // 半穹顶墙型切换渲染
+        renderer.setWall({ kind: 'dome', width: 8, height: 6, radius: 4, arcAngle: Math.PI, azimuth: 0 })
+        renderer.render()
+        log(gl.getError() === 0, '半穹顶墙型映射渲染无 GL 错误')
+
+        renderer.dispose()
+        const allPass = lines.every((l) => l.startsWith('PASS'))
+        document.title = allPass ? 'SMOKE_RESULT:PASS' : 'SMOKE_RESULT:FAIL'
+        log(allPass, '全部冒烟检查完成')
+      } catch (e) {
+        log(false, `异常: ${e.message}`)
+        document.title = 'SMOKE_RESULT:FAIL'
+        out.innerHTML += `\n${e.stack ?? ''}`
+      }
+    </script>
+  </body>
+</html>
